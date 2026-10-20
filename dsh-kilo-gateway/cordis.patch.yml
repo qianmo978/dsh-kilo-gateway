@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-kilo-gateway
+      name: '@local/dsh-kilo-gateway'

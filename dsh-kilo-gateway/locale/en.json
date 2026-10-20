@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Kilo Gateway",
+    "description": "Kilo Code Gateway as a first-party model provider: device-code sign-in, live model discovery, OpenRouter-compatible streaming chat, plus account, code-completion, embedding, and notification tools."
+  }
+}

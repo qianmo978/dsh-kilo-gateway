@@ -1,0 +1,38 @@
+{
+  "name": "@local/dsh-kilo-gateway",
+  "version": "1.8.1",
+  "private": true,
+  "type": "module",
+  "description": "Kilo Code Gateway as a first-party model provider: a dedicated settings page for the API key, device sign-in, anonymous free tier, per-model context windows, streaming chat with self-healing retries, and account/completion/embedding/notification tools.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "locale/*.json",
+    "icon.svg",
+    "lib/*.js",
+    "tools/*.mjs"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}
