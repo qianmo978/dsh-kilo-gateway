@@ -86,6 +86,50 @@ off, so every host that has a settings panel also has the credential remote. The
 dependency on a plugin that can be uninstalled, and nothing in this bundle reads or writes any file
 outside the profile's own credential store.
 
+## The host half's contract
+
+The adapter is handed a `GenerateOptions` object by the Harness. Its shape is fixed by the
+shipped `@deepseek-ai/dsh-llm`, and one field in it is easy to get wrong:
+
+```ts
+interface GenerateOptions {
+  provider: string
+  model: string
+  messages: RequestMessage[]
+  system?: string
+  tools?: ToolSchema[]
+  toolHistory?: ToolHistory      // an OBJECT, not an array
+  temperature?: number
+  maxTokens?: number
+  stop?: string[]
+  signal?: AbortSignal
+  purpose?: 'compaction' | 'session-title'
+}
+
+interface ToolHistory {
+  readonly tools: readonly ToolSchema[]
+  readonly updates: readonly { readonly messageId: MessageId; readonly additions: readonly ToolSchema[] }[]
+}
+```
+
+`toolHistory` is that **object**. Reading it as an array of updates throws
+`toolHistory is not iterable` on every dispatch that carries a tool history — and a
+`toolHistory.length === 0` guard does not catch the mistake, because the length of an object is
+`undefined`, so the comparison is false and the loop runs anyway.
+
+The host reports that failure as `LlmError: toolHistory is not iterable` with code `UNKNOWN`,
+thrown from `ReactLoopAgent.step`. That stack is where the host **re-throws** an adapter failure,
+not where the failure originated: the host wraps a non-`LlmError` as
+`{ message: errorChain(error), code: 'UNKNOWN' }`. A bare `TypeError` message with code `UNKNOWN`
+therefore points at the adapter, and the real throw site is wherever the plugin read the option.
+
+Two more traps in the same interface:
+
+- `streamCall(options, model)` receives the model as a **string id**, not a model object. A model
+  object stringifies to `[object Object]` in every message that mentions the model.
+- `ToolSchema` carries a `deferLoading` flag that is a Harness loading strategy, not provider
+  wire content. It must not be forwarded to the provider.
+
 ### Keeping a long-lived install working
 
 A credential that worked once can stop working: a key gets rotated, a device grant expires, or a
@@ -365,6 +409,7 @@ All fields are `volatile()`, so editing one takes effect without rewriting the p
 node tools/verify.mjs
 node tools/verify-client.mjs
 node tools/verify-publishable.mjs
+node tools/verify-host-contract.mjs
 ```
 
 `tools/verify.mjs` runs the real adapter against a stubbed `fetch`: it asserts the chunk sequence and
@@ -381,6 +426,12 @@ failing the client boot.
 declarations: that an unknown package in the manifest's inject list is skipped rather than fatal,
 that a missing `./client` export *is* fatal, and that `dsh.client.inject` and `dsh.client.immediately`
 are both optional.
+
+`tools/verify-host-contract.mjs` reads the shipped `@deepseek-ai/dsh-llm` out of the app's `asar`
+and asserts the adapter still agrees with it — in particular that `toolHistory` is the
+`ToolHistory` object and is never iterated as an array. A stubbed `fetch` cannot catch that class
+of mistake, because the stub feeds the adapter whatever shape the test author believed in; this
+probe reads the shape the host actually sends.
 
 Neither suite needs a network or a credential.
 
