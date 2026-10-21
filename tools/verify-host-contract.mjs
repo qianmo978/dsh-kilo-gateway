@@ -93,6 +93,45 @@ check(
   'a bare TypeError message with code UNKNOWN originates in the adapter, not in the host',
 )
 
+// --- 5. the tool-call-delta chunk requires a string id on EVERY delta ---------------------
+// The host validates a delta as it arrives, before it can assemble the block:
+//
+//   if (typeof chunk.id !== "string") throw new TypeError("tool-call-delta id must be a string")
+//
+// An OpenAI-shaped stream sends the id only on the first chunk of a call and carries nothing but
+// `arguments` on the rest, so a delta that omits the id is rejected.
+check(
+  'the host rejects a tool-call-delta without a string id',
+  s.includes('tool-call-delta id must be a string'),
+  'the validation runs on every delta, not only on the first',
+)
+
+const streamChunk = s.match(/"name":\s*"StreamChunk",\s*"declaration":\s*"(export type StreamChunk = [^"]*)"/)
+check(
+  'StreamChunk declares tool-call-delta with a required id',
+  streamChunk !== null &&
+    /'tool-call-delta';\s*index:\s*number;\s*id:\s*ToolCallId;\s*name\?:\s*string/.test(
+      streamChunk[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+    ),
+  streamChunk ? 'the id is required; only the name is optional' : 'the declaration was not found',
+)
+
+// The delta the adapter yields must carry the id unconditionally. The `tracker.append` call above
+// it may omit an id — there, "no id yet" is meaningful — so only the yielded chunk is inspected.
+const emittedDelta = adapter.match(/yield\s*\{\s*type:\s*'tool-call-delta',[\s\S]{0,220}?argumentsDelta,?\s*\}/)
+check(
+  'the adapter emits a string id on every tool-call-delta',
+  emittedDelta !== null && /\bid,\s*\n/.test(emittedDelta[0]),
+  emittedDelta
+    ? 'the yielded chunk sets `id` unconditionally'
+    : 'the tool-call-delta chunk was not found',
+)
+check(
+  'the adapter derives an id for a stream that never sent one',
+  /kilo-call-\$\{index\}/.test(adapter),
+  'a provider that omits the id still yields a valid branded id',
+)
+
 let failed = 0
 for (const r of results) {
   if (!r.ok) failed += 1

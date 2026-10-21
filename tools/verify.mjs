@@ -189,6 +189,103 @@ check('a tool call block ends with a valid tool-call block', async () => {
   }
 })
 
+// The host's own validation, transcribed from the shipped `@deepseek-ai/dsh-llm`
+// (`AssistantStreamAccumulator.push`):
+//
+//   if (typeof chunk.id !== "string") throw new TypeError("tool-call-delta id must be a string")
+//
+// Reproduced here so the adapter is checked against the host's rule rather than against the test
+// author's understanding of it.
+function hostAccepts(chunk) {
+  if (chunk.type !== 'tool-call-delta') return true
+  if (typeof chunk.id !== 'string') throw new TypeError('tool-call-delta id must be a string')
+  if (Object.hasOwn(chunk, 'name') && typeof chunk.name !== 'string') {
+    throw new TypeError('tool-call-delta name must be a string')
+  }
+  if (typeof chunk.argumentsDelta !== 'string') {
+    throw new TypeError('tool-call-delta argumentsDelta must be a string')
+  }
+  return true
+}
+
+check('a multi-chunk tool call satisfies the host id rule on every delta', async () => {
+  const original = globalThis.fetch
+  // The OpenAI shape: the first chunk carries the id and the name, the rest carry only arguments.
+  const frames = [
+    {
+      choices: [
+        {
+          index: 0,
+          delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'kilo_account', arguments: '{"incl' } }] },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          index: 0,
+          delta: { tool_calls: [{ index: 0, function: { arguments: 'udeQuota":true}' } }] },
+        },
+      ],
+    },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  ]
+  globalThis.fetch = async () => new Response(sse(frames.map((f) => JSON.stringify(f))), { status: 200 })
+  try {
+    const chunks = await collect(new KiloGatewayAdapter(anonymousCtx), { messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] })
+    const deltas = chunks.filter((c) => c.type === 'tool-call-delta')
+    assert.equal(deltas.length, 2, 'expected two tool-call deltas')
+    // Every delta must pass the host's own check — this is the assertion that failed live.
+    for (const delta of deltas) hostAccepts(delta)
+    // The second delta has no id of its own; it must repeat the first one's.
+    assert.equal(deltas[0].id, 'call_1')
+    assert.equal(deltas[1].id, 'call_1')
+    assert.equal(deltas[1].name, 'kilo_account')
+    // And the finished block must agree with the deltas.
+    const end = chunks.find((c) => c.type === 'block-end' && c.block.type === 'tool-call')
+    assert.ok(end, 'no tool-call block-end')
+    assert.equal(end.block.id, 'call_1')
+    assert.equal(end.block.name, 'kilo_account')
+    assert.equal(JSON.parse(end.block.arguments).includeQuota, true)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+check('a tool call that never sends an id still yields a string id on every delta', async () => {
+  const original = globalThis.fetch
+  const frames = [
+    {
+      choices: [
+        {
+          index: 0,
+          delta: { tool_calls: [{ index: 0, function: { name: 'kilo_account', arguments: '{}' } }] },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          index: 0,
+          delta: { tool_calls: [{ index: 0, function: { arguments: '' } }] },
+        },
+      ],
+    },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  ]
+  globalThis.fetch = async () => new Response(sse(frames.map((f) => JSON.stringify(f))), { status: 200 })
+  try {
+    const chunks = await collect(new KiloGatewayAdapter(anonymousCtx), { messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] })
+    for (const delta of chunks.filter((c) => c.type === 'tool-call-delta')) hostAccepts(delta)
+    const end = chunks.find((c) => c.type === 'block-end' && c.block.type === 'tool-call')
+    assert.ok(end, 'no tool-call block-end')
+    assert.equal(typeof end.block.id, 'string')
+    assert.ok(end.block.id.length > 0, 'the derived id must not be empty')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 check('a stream cut without a terminating blank line still flushes its frame', async () => {
   const original = globalThis.fetch
   globalThis.fetch = async () =>

@@ -130,6 +130,38 @@ Two more traps in the same interface:
 - `ToolSchema` carries a `deferLoading` flag that is a Harness loading strategy, not provider
   wire content. It must not be forwarded to the provider.
 
+### The stream chunks the adapter emits
+
+The adapter yields `StreamChunk`s, and the host validates each one as it arrives:
+
+```ts
+type StreamChunk =
+  | { type: 'block-start'; index: number; blockType: ContentBlockType }
+  | { type: 'text-delta'; index: number; text: string }
+  | { type: 'reasoning-delta'; index: number; text: string }
+  | { type: 'tool-call-delta'; index: number; id: ToolCallId; name?: string; argumentsDelta: string }
+  | { type: 'block-end'; index: number; block: ContentBlock }
+  | { type: 'usage'; usage: TokenUsage }
+  | { type: 'finish'; reason: FinishReason; replayState?: ReplayEnvelope }
+```
+
+The `id` on a `tool-call-delta` is **required, and required on every delta**:
+
+```js
+if (typeof chunk.id !== "string") throw new TypeError("tool-call-delta id must be a string")
+```
+
+An OpenAI-shaped stream sends the id only on the *first* chunk of a call and carries nothing but
+`arguments` on the rest, so a delta that forwards the provider's id as-is omits it from every
+continuation chunk and the host rejects the stream. The adapter therefore remembers the id per
+block and repeats it, deriving a stable one for a provider that never sent any — the same id the
+finished `tool-call` block carries, so the deltas and the block agree.
+
+The host's *assembly* is more forgiving than its *validation*: it falls back to
+`brandString('call-' + index)` when no id was seen. That fallback is unreachable for a provider
+that streams a tool call in more than one chunk, because the validation rejects the second chunk
+first.
+
 ### Keeping a long-lived install working
 
 A credential that worked once can stop working: a key gets rotated, a device grant expires, or a
