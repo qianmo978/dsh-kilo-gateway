@@ -335,21 +335,51 @@ check('stop sequences reach the wire', async () => {
   }
 })
 
-check('tools added mid-session are sent, removed ones are not', async () => {
+check('tools added mid-session are sent, and the real ToolHistory shape is accepted', async () => {
   const stub = stubChat(() => new Response(sse([JSON.stringify(okChunk), JSON.stringify(finishChunk)]), { status: 200 }))
   try {
     await collect(new KiloGatewayAdapter(anonymousCtx), {
       ...oneTurn,
       tools: [{ name: 'kilo_account', description: 'a', parameters: { type: 'object' } }],
-      toolHistory: [
-        { messageId: 'm1', additions: [{ name: 'kilo_login', description: 'b', parameters: { type: 'object' } }] },
-        { messageId: 'm2', removals: [{ type: 'tool-removal', toolName: 'kilo_account' }] },
-      ],
+      // The host's `ToolHistory` is an OBJECT with a `tools` list and an `updates` list — not an
+      // array of updates. Iterating it directly throws "toolHistory is not iterable", and
+      // `toolHistory.length` is undefined, so a `length === 0` guard does not catch the mistake.
+      toolHistory: {
+        tools: [
+          { name: 'kilo_account', description: 'a', parameters: { type: 'object' } },
+          { name: 'kilo_login', description: 'b', parameters: { type: 'object' } },
+        ],
+        updates: [{ messageId: 'm1', additions: [{ name: 'kilo_complete', description: 'c', parameters: { type: 'object' } }] }],
+      },
     })
-    const names = stub.chats()[0].tools.map((t) => t.function.name)
-    assert.deepEqual(names, ['kilo_login'])
+    const names = stub.chats()[0].tools.map((t) => t.function.name).sort()
+    assert.deepEqual(names, ['kilo_account', 'kilo_complete', 'kilo_login'])
   } finally {
     stub.restore()
+  }
+})
+
+check('a host-shaped toolHistory never throws, whatever it carries', async () => {
+  // The exact failure the host reported: a ToolHistory object reaching the adapter must not be
+  // iterated as if it were an array.
+  const shapes = [
+    { tools: [], updates: [] },
+    { tools: [{ name: 'a', description: 'a', parameters: { type: 'object' } }], updates: [] },
+    { updates: [{ messageId: 'm1', additions: [] }] },
+    { tools: [], updates: [{ messageId: 'm1', additions: [{ name: 'b', description: 'b', parameters: { type: 'object' } }] }] },
+  ]
+  for (const toolHistory of shapes) {
+    const stub = stubChat(() => new Response(sse([JSON.stringify(okChunk), JSON.stringify(finishChunk)]), { status: 200 }))
+    try {
+      await collect(new KiloGatewayAdapter(anonymousCtx), {
+        ...oneTurn,
+        tools: [{ name: 'kilo_account', description: 'a', parameters: { type: 'object' } }],
+        toolHistory,
+      })
+      assert.ok(Array.isArray(stub.chats()[0].tools))
+    } finally {
+      stub.restore()
+    }
   }
 })
 
