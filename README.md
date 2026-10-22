@@ -86,6 +86,47 @@ off, so every host that has a settings panel also has the credential remote. The
 dependency on a plugin that can be uninstalled, and nothing in this bundle reads or writes any file
 outside the profile's own credential store.
 
+**No external package.** The bundle imports nothing but Node builtins and, in the browser half,
+`react` (which the web shell's module table provides). The schema library is vendored under
+`vendor/`, and `tools/verify-installable.mjs` enforces that rule.
+
+## Why the schema library is vendored
+
+A plugin that imports `@deepseek-ai/schemastery` fails to activate on most machines:
+
+```
+failed to import: Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/schemastery'
+```
+
+The Harness routes a plugin's `@deepseek-ai/*` imports to the host's own copy — but only for the
+packages the host ships as **host-core**:
+
+```js
+for (const entry of readdirSync(join(hostNodeModulesRoot(dir), '@deepseek-ai'))) {
+  if (/^(?:dsh|cordis)/.test(entry.name)) names.add(`@deepseek-ai/${entry.name}`)
+}
+```
+
+`schemastery` matches neither prefix, so it is **never routed**. It has to be resolvable from the
+plugin's own directory, the way Node resolves it.
+
+A plugin installed with `link:` — the form the Harness documents, `dsh plugin add "link:$PWD"` —
+has no `node_modules` of its own: pnpm does not install the dependencies of a linked package. So
+the bundle activates on a machine where some *other* plugin happens to have installed
+`schemastery`, and fails everywhere else. Declaring it as a `dependency` does not help, for the
+same reason: the dependency is never installed.
+
+The fix is to carry what the bundle imports:
+
+```
+vendor/schemastery/lib/index.mjs   # @deepseek-ai/schemastery 3.18.4, MIT
+vendor/cosmokit/lib/index.js       # @deepseek-ai/cosmokit 1.8.5, MIT
+```
+
+`tools/vendor-schemastery.mjs` is the record of where they came from: it re-vendors from a local
+install, rewrites schemastery's bare `@deepseek-ai/cosmokit` import to a relative path, and
+`--check` verifies the copies are current. Both upstream `LICENSE` files are kept.
+
 ## The host half's contract
 
 The adapter is handed a `GenerateOptions` object by the Harness. Its shape is fixed by the
@@ -442,6 +483,8 @@ node tools/verify.mjs
 node tools/verify-client.mjs
 node tools/verify-publishable.mjs
 node tools/verify-host-contract.mjs
+node tools/verify-installable.mjs
+node tools/vendor-schemastery.mjs --check
 ```
 
 `tools/verify.mjs` runs the real adapter against a stubbed `fetch`: it asserts the chunk sequence and
@@ -464,6 +507,11 @@ and asserts the adapter still agrees with it — in particular that `toolHistory
 `ToolHistory` object and is never iterated as an array. A stubbed `fetch` cannot catch that class
 of mistake, because the stub feeds the adapter whatever shape the test author believed in; this
 probe reads the shape the host actually sends.
+
+`tools/verify-installable.mjs` asserts the bundle imports nothing it does not carry: every bare
+import is a Node builtin or `react`, the vendored copies are present with their licences, and the
+whole host-side tree imports cleanly with no package installed alongside it — the situation on a
+machine that has only this plugin.
 
 Neither suite needs a network or a credential.
 
