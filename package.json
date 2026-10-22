@@ -1,6 +1,6 @@
 {
-  "name": "@local/dsh-kilo-gateway",
-  "version": "1.8.1",
+  "name": "@qianmo978/dsh-kilo-gateway",
+  "version": "1.9.0",
   "private": true,
   "type": "module",
   "description": "Kilo Code Gateway as a first-party model provider: a dedicated settings page for the API key, device sign-in, anonymous free tier, per-model context windows, streaming chat with self-healing retries, and account/completion/embedding/notification tools.",

@@ -11,15 +11,21 @@
 
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { readFileSync } from 'node:fs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const clientPath = join(here, '..', 'client.js')
+const manifest = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'))
 
 globalThis.window = { __ModuleLoader__: { load: (definition) => { globalThis.__captured = definition } } }
 await import(`file:///${clientPath.replace(/\\/g, '/')}`)
 
 const definition = globalThis.__captured
-if (definition.id !== '@local/dsh-kilo-gateway') throw new Error(`id mismatch: ${definition.id}`)
+// The browser half's module id is the package name: the host finds the client bundle through the
+// package's own "./client" export, and the shipped bundles use their package name as the id.
+if (definition.id !== manifest.name) {
+  throw new Error(`id mismatch: the client half loads as "${definition.id}" but the package is "${manifest.name}"`)
+}
 
 let effects = []
 const stubReact = {

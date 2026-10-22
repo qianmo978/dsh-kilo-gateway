@@ -98,7 +98,51 @@ check(
     : [...external.entries()].map(([s, files]) => `${s} (in ${files.join(', ')})`).join('; '),
 )
 
-// --- 2. the vendored copies are present and carry their upstream licence -------------------
+// --- 2. the package name is stated once, in the three places the host reads it -------------
+// The host resolves a bundle by its package name, and the three places that name appears have to
+// agree: the manifest, the browser half's module id, and the Loader patch row that inserts the
+// bundle. A mismatch shows up as a bundle that installs but never mounts.
+const manifestText = readFileSync(join(ROOT, 'package.json'), 'utf8')
+const manifestName = JSON.parse(manifestText).name
+check(
+  'the package name is a valid package name',
+  typeof manifestName === 'string' && /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(manifestName),
+  `the package is "${manifestName}"`,
+)
+
+const clientText = readFileSync(join(ROOT, 'client.js'), 'utf8')
+const clientId = clientText.match(/__ModuleLoader__\.load\(\{\s*id:\s*['"]([^'"]+)['"]/)?.[1]
+check(
+  'the browser half loads under the package name',
+  clientId === manifestName,
+  clientId === manifestName
+    ? `both say "${manifestName}"`
+    : `the client half loads as "${clientId}" but the package is "${manifestName}"`,
+)
+
+const patchText = readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8')
+const patchName = patchText.match(/^\s*name:\s*['"]?([^'"\n]+)['"]?/m)?.[1]?.trim()
+check(
+  'the Loader patch row names the same package',
+  patchName === manifestName,
+  patchName === manifestName
+    ? `both say "${manifestName}"`
+    : `the patch row names "${patchName}" but the package is "${manifestName}"`,
+)
+
+const patchId = patchText.match(/^\s*-\s*id:\s*['"]?([^'"\n]+)['"]?/m)?.[1]?.trim()
+const settingsNs = readFileSync(join(ROOT, 'index.js'), 'utf8').match(
+  /const SETTINGS_NS = '([^']+)'/,
+)?.[1]
+check(
+  'the settings namespace matches the patch row id',
+  patchId !== undefined && patchId === settingsNs,
+  patchId === settingsNs
+    ? `both say "${patchId}"`
+    : `the patch row id is "${patchId}" but SETTINGS_NS is "${settingsNs}"`,
+)
+
+// --- 3. the vendored copies are present and carry their upstream licence -------------------
 for (const [pkg, entry] of [
   ['schemastery', 'lib/index.mjs'],
   ['cosmokit', 'lib/index.js'],

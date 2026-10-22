@@ -30,7 +30,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-kilo-gateway',
+  id: '@qianmo978/dsh-kilo-gateway',
   factory(require) {
     const React = require('react')
     const h = React.createElement
